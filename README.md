@@ -168,3 +168,47 @@ writes to the browser's history. Search runs outside the MCP event loop. Public
 downloads run in killable workers with a five-second hard deadline, including
 DNS and HTTP header waits; at most four downloads run concurrently.
 
+## Ask ordinary questions with background indexing
+
+By default, the server exposes `search_history` for ordinary questions and
+`indexing_status` for optional progress checks. Ask naturally:
+
+> Which pages have I visited in the last three days about LiDAR?
+
+Search returns existing matches from titles, URLs, and cached text immediately.
+When there are no matches yet, the MCP request waits and rechecks after
+indexing advances, returning as soon as it finds matches or indexing finishes.
+If content coverage is incomplete, it schedules background indexing and
+includes a brief completeness notice in the answer. It does not wait for downloads to finish.
+One worker continues through batches of five pages with up to four concurrent
+downloads. Repeated searches share that worker; wider date windows are merged
+into the active job. Later searches automatically use the expanded cache.
+
+To check progress, ask "Has background indexing finished?". The status includes
+queued/running/completed/failed/paused/stopped state, indexed and failed counts,
+and remaining candidates. Completion means all currently eligible candidates
+were attempted, not that every page was successfully downloaded. A job stops
+after 40 batches (at most 200 attempts); another search can resume it. Completed
+jobs have a 60-second cooldown before rescanning the same date window. Cache
+contents persist across server restarts; progress counters do not.
+
+The worker shuts down with the MCP process and schedules no new batches after
+shutdown begins. Current page downloads retain their five-second deadline.
+Failed indexing never discards existing matches. Live database snapshots remain
+bounded, and recovery occurs only in a private copy. A request can still spend
+time reading/searching local history; it no longer waits for web downloads.
+
+Restart the MCP server, refresh tools, and start a new chat to discard old tool
+choices. For manual indexing or SQL debugging, add `--advanced-tools` to launch
+arguments. The Python `search_history` function remains cache-only for offline
+use; the MCP tool schedules background indexing automatically.
+
+Boolean flags accept true/false or their equivalent strings. Page text is
+current at fetch time, not a historical archive, and failed or login-only
+pages leave content coverage incomplete. Embeddings are not implemented.
+
+Normal searches return only a brief summary, matching pages (title, URL, visit
+time, optional excerpt or spelling-match note), and a short completeness
+notice. Progress counters and debugging details remain in `indexing_status`,
+which should be used only for explicit progress questions.
+
