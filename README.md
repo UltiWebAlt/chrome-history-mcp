@@ -218,3 +218,11 @@ instructed to preserve those groups instead of creating separate link and
 excerpt lists. Titles and excerpts are escaped as text. The Python API keeps
 its structured result for programmatic use.
 
+Empty searches wait up to 45 seconds by default without a client progress token,
+or 300 seconds with one. MCP progress notifications allow supporting clients to
+extend their request timeout; the client must enable that behavior. Set
+`HISTORY_SEARCH_WAIT_SECONDS` in the MCP server environment to override the
+wait budget, keeping it below the client's timeout if progress resets are not
+supported. Indexing continues after the wait budget expires, and the answer
+clearly says the search is still pending instead of claiming there are no matches.
+Paused batch runs resume automatically while that request is waiting.

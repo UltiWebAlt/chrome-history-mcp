@@ -463,6 +463,48 @@ def answer_history(query, days_back=3, limit=10, fuzzy=True):
     return {"summary": summary, "pages": pages, "notice": " ".join(notices)}
 
 
+async def wait_for_history_answer(arguments, context=None, wait_seconds=None, poll_seconds=1):
+    """Keep an empty search open while the shared indexer produces evidence."""
+    search = partial(
+        answer_history, query=arguments.get("query"),
+        days_back=arguments.get("days_back", 3), limit=arguments.get("limit", 10),
+        fuzzy=arguments.get("fuzzy", True),
+    )
+    result = await anyio.to_thread.run_sync(lambda: search())
+    if result["pages"]:
+        return result
+    token = getattr(getattr(context, "meta", None), "progressToken", None)
+    if wait_seconds is None:
+        # Clients without progress support need a short response deadline.
+        wait_seconds = float(os.environ.get("HISTORY_SEARCH_WAIT_SECONDS", "300" if token is not None else "45"))
+    deadline = time.monotonic() + max(0, wait_seconds)
+    last_revision = None
+    progress = 0
+    while time.monotonic() < deadline:
+        state = indexing_status()
+        revision = state.get("updated_at")
+        if revision != last_revision:
+            result = await anyio.to_thread.run_sync(lambda: search())
+            if result["pages"]:
+                return result
+            last_revision = revision
+            if token is not None:
+                progress += 1
+                await context.session.send_progress_notification(
+                    token, progress, message="Searching newly indexed browsing history."
+                )
+        if state.get("state") == "paused":
+            # Resume capped batches within this request, without another question.
+            get_background_indexer().request(search_integer(arguments.get("days_back", 3), "days_back", 3650))
+        elif state.get("state") not in {"queued", "running"}:
+            return await anyio.to_thread.run_sync(lambda: search())
+        await anyio.sleep(min(poll_seconds, max(0, deadline - time.monotonic())))
+    result = await anyio.to_thread.run_sync(lambda: search())
+    if not result["pages"] and indexing_status().get("state") in {"queued", "running", "paused"}:
+        result["summary"] = "Search is still in progress; no matching pages have been found yet."
+    return result
+
+
 @click.command()
 @click.option(
     "--browser",
@@ -501,11 +543,7 @@ def main(path: Path | None, browser: str, advanced_tools: bool) -> int:
             ))
             return [types.TextContent(type="text", text=json.dumps(result))]
         if name == "search_history":
-            result = await anyio.to_thread.run_sync(partial(
-                answer_history, query=arguments.get("query"),
-                days_back=arguments.get("days_back", 3), limit=arguments.get("limit", 10),
-                fuzzy=arguments.get("fuzzy", True),
-            ))
+            result = await wait_for_history_answer(arguments, app.request_context)
             return [types.TextContent(type="text", text=render_history_results(result))]
         if name != "fetch-urls-from-sqlite" and name != "fetch-visits-info-from-sqlite":
             raise ValueError(f"Unknown tool: {name}")
@@ -552,7 +590,7 @@ def main(path: Path | None, browser: str, advanced_tools: bool) -> int:
                     "LiDAR?', use query='lidar', days_back=3. Automatically searches titles, URLs, "
                     "and cached page text immediately. Missing public-page text is indexed in the background. "
                     "No SQL or separate indexing call is needed. Handles typos like lider/lidar. "
-                    "Return the supplied Markdown, preserving "
+                    "The tool waits for newly indexed matches when the initial search is empty. Return the supplied Markdown, preserving "
                     "each page link, visit date, and excerpt together in one group. Do not make "
                     "a separate URL list or move excerpts away from their links. "
                     "Keep the completeness notice brief. Do not describe function calls, "
