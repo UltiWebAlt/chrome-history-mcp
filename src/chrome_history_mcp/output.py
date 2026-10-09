@@ -1,7 +1,7 @@
 """Readable, grouped output for history search tool responses."""
 import html
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from urllib.parse import quote, urlsplit
 
 
@@ -15,8 +15,8 @@ def _visited(value):
     try:
         date = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if date.tzinfo is not None:
-            date = date.astimezone(timezone.utc)
-            return date.strftime("%b %d, %Y at %H:%M UTC")
+            date = date.astimezone()
+            return date.strftime("%b %d, %Y at %H:%M %Z")
     except (ValueError, TypeError, AttributeError):
         pass
     return value

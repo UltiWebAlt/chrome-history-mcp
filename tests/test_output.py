@@ -18,7 +18,7 @@ class OutputTests(unittest.TestCase):
         self.assertLess(text.index('https://example.com/drone'), text.index('First excerpt'))
         self.assertLess(text.index('First excerpt'), text.index('https://example.com/second'))
         self.assertLess(text.index('https://example.com/second'), text.index('Second excerpt'))
-        expected = 'Oct 08, 2026 at 20:00 UTC'
+        expected = datetime.fromisoformat(self.page()['last_visited_at']).astimezone().strftime('%b %d, %Y at %H:%M %Z')
         self.assertIn(expected, text)
 
     def test_content_is_escaped_and_url_encoded(self):
@@ -40,3 +40,13 @@ class OutputTests(unittest.TestCase):
         self.assertNotIn('Visited:', text)
 
 
+    @unittest.skipUnless(hasattr(time, 'tzset'), 'Requires timezone selection support')
+    def test_local_timezone_observes_summer_winter_and_date_rollover(self):
+        try:
+            with patch.dict(os.environ, {'TZ': 'America/New_York'}):
+                time.tzset()
+                self.assertEqual(_visited('2026-10-06T15:40:00+00:00'), 'Oct 06, 2026 at 11:40 EDT')
+                self.assertEqual(_visited('2026-01-06T15:40:00Z'), 'Jan 06, 2026 at 10:40 EST')
+                self.assertEqual(_visited('2026-10-06T02:00:00Z'), 'Oct 05, 2026 at 22:00 EDT')
+        finally:
+            time.tzset()
