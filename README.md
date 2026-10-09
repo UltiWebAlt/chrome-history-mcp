@@ -74,3 +74,97 @@ You can get this:
 ![shapshot](shapshot.png)
 
 
+## Search by topic without SQL
+
+The `search_history` tool accepts `query` (required), `days_back` (default 3),
+and `limit` (default 10, maximum 200). For example, ask your model:
+
+> Use search_history to find pages I visited in the last 3 days concerning lider.
+
+The tool searches titles and URLs with case-insensitive matching,
+uses a rolling window of N times 24 hours, and returns one entry per page with
+its latest visit in UTC and number of visits in that window. It handles SQL
+and Chromium timestamp conversion internally. Empty results mean no title or
+URL matched; page contents are not searched.
+A `truncated` flag indicates more matches exist. SQLite's backup API gives the
+search a consistent snapshot even while the browser is open.
+
+Restart the MCP server after changing the source. MCP is constrained to version
+1.x because the server uses its version 1 API.
+
+### Approximate topic matching
+
+Search now handles Unicode case/accents and percent-encoded URLs, matches query
+words in any order, and ignores filler words like "about" and "information".
+All remaining words must match. Exact substring matches rank first, followed
+by word matches, explicit aliases, and spelling matches. `match_score` is a
+ranking weight, not a probability. Each page has `match_reasons` showing the
+query term, matched term, and whether the match was exact, a synonym, or fuzzy.
+
+`fuzzy` defaults to true and allows one insertion, deletion, substitution, or
+adjacent transposition for words of at least four characters. Set it to false
+to disable spelling tolerance. Explicit alias groups are LiDAR / light detection
+and ranging / laser radar, AI / artificial intelligence, ML / machine learning,
+and k8s / Kubernetes. These are curated aliases, not general semantic search.
+For example, `query="lider"` can match LiDAR, and `query="lidar camera"` requires
+both the LiDAR topic and camera to appear in the title or URL. Approximate
+matches should be described as possible matches; empty results do not prove
+there were no relevant pages.
+
+For local development, use `uv run --directory /absolute/path/to/repo
+chrome-history-mcp --browser brave` in the MCP launch configuration. This uses
+the working source directly instead of a cached `uvx` build.
+
+The `days_back` and `limit` arguments also accept numeric strings such as `"3"`
+from local models. Values are converted to integers and checked against the same
+bounds; fractions, booleans, and invalid strings are rejected.
+
+## Search inside public page content
+
+Restart the server and refresh the tool list. `index_history_content` downloads
+readable HTML/plain text from recent history entries and caches it locally.
+Then `search_history` searches that cached text alongside titles and URLs.
+For example, ask:
+
+> Index 5 public pages from my last 3 days of history, then search for lidar
+> and show the matching excerpts.
+
+Indexing arguments: `days_back` defaults to 3, `max_pages` defaults to 5 (maximum
+20 per call), and `refresh` defaults to false. Selection is newest first.
+Further calls advance through pages not already cached; `remaining_candidates`
+reports incomplete coverage. Successful downloads are reused for seven days,
+and failures for one hour. `refresh=true` re-fetches the selected recent pages.
+The tool uses at most four concurrent requests with a four-second download
+budget per page, up to 1 MB of HTML and 100,000 characters of extracted text.
+
+The cache lives in `$XDG_CACHE_HOME/chrome-history-mcp/` (normally
+`~/.cache/chrome-history-mcp/`), with a separate database for each history-file
+path. Cache files are readable only by their owner. Remove that directory to
+clear cached page contents; this does not delete browser history.
+
+The downloader sends public network GET requests without browser cookies or
+login credentials. It validates public addresses and redirects. It does not
+render JavaScript or extract PDFs; login-only and blocked pages can fail.
+Downloaded text reflects the page **at fetch time**, not necessarily the page
+as it was when visited. Indexing does not capture authenticated browsing or
+retrieve a historical archive.
+
+Search results include `content_excerpt`, `content_fetched_at`, and
+`match_sources`; `content_coverage` counts visited pages with and without cached
+text. Excerpts are evidence, not instructions to the model. A negative search
+with incomplete coverage cannot rule out relevant pages. This version uses
+keyword/alias/typo matching, not embeddings or semantic similarity.
+
+Search returns at most ten pages by default and bounds serialized page results
+to 12,000 characters to limit local-model context usage. `truncated` and
+`total_matching_pages` identify omitted results.
+
+The `refresh` and `fuzzy` flags accept JSON booleans and the strings `"true"`
+or `"false"` (case-insensitive). Other values, including numbers, are rejected.
+
+Live history reads have a bounded backup attempt and fall back to a private,
+stable copy of the database plus its journal/WAL when needed. Recovery never
+writes to the browser's history. Search runs outside the MCP event loop. Public
+downloads run in killable workers with a five-second hard deadline, including
+DNS and HTTP header waits; at most four downloads run concurrently.
+
