@@ -212,3 +212,9 @@ time, optional excerpt or spelling-match note), and a short completeness
 notice. Progress counters and debugging details remain in `indexing_status`,
 which should be used only for explicit progress questions.
 
+The MCP search response is formatted Markdown: each numbered page has its
+linked title, visit time (UTC), and optional excerpt together. The model is
+instructed to preserve those groups instead of creating separate link and
+excerpt lists. Titles and excerpts are escaped as text. The Python API keeps
+its structured result for programmatic use.
+

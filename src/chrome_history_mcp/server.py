@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from . import content
 from .background import BackgroundIndexer
+from .output import render_history_results
 import threading
 import re
 import unicodedata
@@ -505,7 +506,7 @@ def main(path: Path | None, browser: str, advanced_tools: bool) -> int:
                 days_back=arguments.get("days_back", 3), limit=arguments.get("limit", 10),
                 fuzzy=arguments.get("fuzzy", True),
             ))
-            return [types.TextContent(type="text", text=json.dumps(result))]
+            return [types.TextContent(type="text", text=render_history_results(result))]
         if name != "fetch-urls-from-sqlite" and name != "fetch-visits-info-from-sqlite":
             raise ValueError(f"Unknown tool: {name}")
         
@@ -551,7 +552,7 @@ def main(path: Path | None, browser: str, advanced_tools: bool) -> int:
                     "LiDAR?', use query='lidar', days_back=3. Automatically searches titles, URLs, "
                     "and cached page text immediately. Missing public-page text is indexed in the background. "
                     "No SQL or separate indexing call is needed. Handles typos like lider/lidar. "
-                    "Return matching pages, preserving "
+                    "Return the supplied Markdown, preserving "
                     "each page link, visit date, and excerpt together in one group. Do not make "
                     "a separate URL list or move excerpts away from their links. "
                     "Keep the completeness notice brief. Do not describe function calls, "
