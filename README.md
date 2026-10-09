@@ -1,4 +1,30 @@
-# A mcp server expose your Chrome history to AI
+# An MCP server that exposes Chrome, Brave, and Microsoft Edge history to AI
+
+Chrome remains the default. Select a browser with `--browser`:
+
+```bash
+uv run chrome-history-mcp --browser brave
+uv run chrome-history-mcp --browser edge
+```
+
+Each invocation reads one browser profile. The Brave and Edge default history files are:
+
+| OS | Brave | Microsoft Edge |
+| --- | --- | --- |
+| Windows | `%LOCALAPPDATA%\BraveSoftware\Brave-Browser\User Data\Default\History` | `%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\History` |
+| macOS | `~/Library/Application Support/BraveSoftware/Brave-Browser/Default/History` | `~/Library/Application Support/Microsoft Edge/Default/History` |
+| Linux | `~/.config/BraveSoftware/Brave-Browser/Default/History` | `~/.config/microsoft-edge/Default/History` |
+
+On Linux, `XDG_CONFIG_HOME` replaces `~/.config` when set. `--path` overrides
+the default location for any browser, including non-default profiles:
+
+```bash
+uv run chrome-history-mcp --browser edge --path "/path/to/Profile 1/History"
+```
+
+For MCP client configuration, add `"--browser", "brave"` or
+`"--browser", "edge"` to the server's `args`. Configure separate server entries
+to access multiple browsers at once. The command and MCP tool names remain unchanged.
 
 ## Setup & Running
 

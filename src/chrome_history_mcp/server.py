@@ -7,9 +7,46 @@ from pathlib import Path
 import platform
 import shutil
 import sqlite3
+import tempfile
 
 history_file_original = None
 history_file_tmp = "chrome-history-snapshot"
+
+def default_history_path(browser: str) -> Path:
+    """Locate a stable Chromium browser's Default profile history."""
+    system = platform.system().lower()
+    browser_paths = {
+        "windows": {
+            "chrome": "Google/Chrome/User Data",
+            "brave": "BraveSoftware/Brave-Browser/User Data",
+            "edge": "Microsoft/Edge/User Data",
+        },
+        "darwin": {
+            "chrome": "Google/Chrome",
+            "brave": "BraveSoftware/Brave-Browser",
+            "edge": "Microsoft Edge",
+        },
+        "linux": {
+            "chrome": "google-chrome",
+            "brave": "BraveSoftware/Brave-Browser",
+            "edge": "microsoft-edge",
+        },
+    }
+    if system not in browser_paths:
+        raise click.ClickException(
+            f"Unsupported operating system: {system}. Specify --path explicitly."
+        )
+    if system == "windows":
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if not local_app_data:
+            raise click.ClickException("LOCALAPPDATA is unset. Specify --path explicitly.")
+        root = Path(local_app_data)
+    elif system == "darwin":
+        root = Path.home() / "Library" / "Application Support"
+    else:
+        root = Path(os.getenv("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return root / browser_paths[system][browser] / "Default" / "History"
+
 
 async def fetch_from_sqlite(
     sql_statement: str,
@@ -41,13 +78,20 @@ async def fetch_from_sqlite(
 
 @click.command()
 @click.option(
+    "--browser",
+    type=click.Choice(["chrome", "brave", "edge"], case_sensitive=False),
+    default="chrome",
+    show_default=True,
+    help="Browser whose Default profile history to read; --path overrides its location.",
+)
+@click.option(
     "--path",
     required=False,
     default=None,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Path to the history file of Chrome",
+    help="Path to a Chrome, Brave, or Microsoft Edge history file.",
 )
-def main(path: str) -> int:
+def main(path: Path | None, browser: str) -> int:
     app = Server("chrome-history-mcp", version="0.1.0")
 
     @app.call_tool()
@@ -69,7 +113,7 @@ def main(path: str) -> int:
                 name="fetch-urls-from-sqlite",
                 description=
                 '''
-                Use SQL to query SQLite data tables that contain "URL" information of Chrome history. Table schema:
+                Use SQL to query SQLite data tables that contain "URL" information of the selected browser history (Chrome, Brave, or Microsoft Edge). Table schema:
                 CREATE TABLE urls(id INTEGER PRIMARY KEY AUTOINCREMENT,url LONGVARCHAR,title LONGVARCHAR,visit_count INTEGER DEFAULT 0 NOT NULL,typed_count INTEGER DEFAULT 0 NOT NULL,last_visit_time INTEGER NOT NULL,hidden INTEGER DEFAULT 0 NOT NULL);
                 CREATE INDEX urls_url_index ON urls (url);
                 ''',
@@ -88,7 +132,7 @@ def main(path: str) -> int:
                 name="fetch-visits-info-from-sqlite",
                 description=
                 '''
-                Use SQL to query SQLite data tables that contain "visits" information of Chrome history. Table schema:
+                Use SQL to query SQLite data tables that contain "visits" information of the selected browser history (Chrome, Brave, or Microsoft Edge). Table schema:
                 CREATE TABLE visits(id INTEGER PRIMARY KEY AUTOINCREMENT,url INTEGER NOT NULL,visit_time INTEGER NOT NULL,from_visit INTEGER,transition INTEGER DEFAULT 0 NOT NULL,segment_id INTEGER,visit_duration INTEGER DEFAULT 0 NOT NULL,incremented_omnibox_typed_score BOOLEAN DEFAULT FALSE NOT NULL,opener_visit INTEGER,originator_cache_guid TEXT,originator_visit_id INTEGER,originator_from_visit INTEGER,originator_opener_visit INTEGER,is_known_to_sync BOOLEAN DEFAULT FALSE NOT NULL, consider_for_ntp_most_visited BOOLEAN DEFAULT FALSE NOT NULL, external_referrer_url TEXT, visited_link_id INTEGER, app_id TEXT);
                 CREATE INDEX visits_url_index ON visits (url);
                 CREATE INDEX visits_from_index ON visits (from_visit);
@@ -109,19 +153,12 @@ def main(path: str) -> int:
         ]
 
     if path is None:
-        # Check os type and set default path
-        system = platform.system().lower()
-        if system == 'windows':
-            path = Path(os.getenv('LOCALAPPDATA', '')) / 'Google' / 'Chrome' / 'User Data' / 'Default' / 'History'
-        elif system == 'darwin':  # macOS
-            path = Path.home() / 'Library' / 'Application Support' / 'Google' / 'Chrome' / 'Default' / 'History'
-        elif system == 'linux':
-            path = Path.home() / '.config' / 'google-chrome' / 'Default' / 'History'
+        path = default_history_path(browser)
     else:
         path = Path(path)
     
     if not path.exists():
-        raise FileNotFoundError(f"History file not found at {path}")
+        raise click.ClickException(f"History file not found at {path}. Specify --path for another profile.")
     
     global history_file_original
     history_file_original = str(path)
@@ -133,6 +170,9 @@ def main(path: str) -> int:
                 read_stream, write_stream, app.create_initialization_options()
             )
 
-    anyio.run(arun)
+    global history_file_tmp
+    with tempfile.TemporaryDirectory(prefix=f"{browser}-history-") as snapshot_dir:
+        history_file_tmp = str(Path(snapshot_dir) / "History")
+        anyio.run(arun)
 
     return 0
