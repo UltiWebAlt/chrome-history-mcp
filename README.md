@@ -227,3 +227,82 @@ wait budget, keeping it below the client's timeout if progress resets are not
 supported. Indexing continues after the wait budget expires, and the answer
 clearly says the search is still pending instead of claiming there are no matches.
 Paused batch runs resume automatically while that request is waiting.
+
+
+## Network access and Tailscale
+
+The default transport is still `stdio`, so existing local MCP configurations
+continue to work. Use Streamable HTTP to access this machine's browser history
+from another device. The MCP endpoint is `/mcp`.
+
+Start a standalone HTTP server on loopback:
+
+```bash
+uv run chrome-history-mcp --browser brave --transport http --host 127.0.0.1 --port 8765
+```
+
+To listen directly on Tailscale, find this machine's address with `tailscale ip -4`,
+then bind to that address (replace the example IP):
+
+```bash
+uv run chrome-history-mcp --browser brave --transport http --host 100.101.102.103 --port 8765
+```
+
+On another device in your tailnet, configure LM Studio's `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "brave-history-remote": {
+      "url": "http://100.101.102.103:8765/mcp"
+    }
+  }
+}
+```
+
+The host machine must keep the server running. Remote clients search the host's
+history and share its content cache and background indexer; they do not search
+the connecting device's browser. Visit times use the host's local timezone.
+Tailscale encrypts connections across the tailnet. Access is governed by your
+tailnet's device permissions and ACLs/grants.
+
+Options:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--transport` | `stdio` | `stdio`, `http`, or `both` |
+| `--host` | `127.0.0.1` | HTTP bind address |
+| `--port` | `8765` | HTTP port, from 1 to 65535 |
+| `--allowed-host` | bind host and localhost, with port | Additional accepted Host header; repeat for DNS aliases |
+| `--http-token` | unset | Optional bearer token; also read from `HISTORY_MCP_HTTP_TOKEN` |
+
+For MagicDNS, add the name and port you use in the client URL:
+
+```bash
+uv run chrome-history-mcp --browser brave --transport http \
+  --host 100.101.102.103 --port 8765 --allowed-host my-desktop:8765
+```
+
+For HTTPS through [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve),
+keep the server bound to loopback and add your actual HTTPS hostname as an
+allowed host. Start the proxy with `tailscale serve --bg http://127.0.0.1:8765`,
+then use its printed HTTPS URL with `/mcp` appended. If the proxy preserves the
+public Host header, the allowed-host value must match it, including the port
+only if present. Tailscale Serve is private to the tailnet.
+
+`--transport both` serves HTTP alongside the stdio connection used by a local
+MCP client. It runs for the lifetime of that local client process; for access
+independent of LM Studio, run `--transport http` in a separate terminal or service.
+
+HTTP Host and Origin checks remain enabled. Binding to `0.0.0.0` exposes the port
+on all IPv4 interfaces; explicitly add the hostnames/IPs clients use with
+`--allowed-host`. Prefer a Tailscale IP for direct tailnet access. Without a bearer
+token, any device allowed to reach the service can read the selected history
+and request public-page indexing. This server does not implement OAuth.
+If you enable `HISTORY_MCP_HTTP_TOKEN`, clients must send the HTTP header
+`Authorization: Bearer <token>`; use a client that supports custom headers.
+Keep tokens out of source control. HTTP server diagnostics go to stderr.
+
+See [LM Studio remote MCP configuration](https://lmstudio.ai/docs/integrations/mcp-remote)
+and the [Tailscale CLI reference](https://tailscale.com/docs/reference/tailscale-cli)
+for client and network setup.

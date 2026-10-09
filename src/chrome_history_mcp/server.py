@@ -525,7 +525,14 @@ async def wait_for_history_answer(arguments, context=None, wait_seconds=None, po
     is_flag=True,
     help="Also expose manual indexing and SQL tools (default exposes one automatic search tool).",
 )
-def main(path: Path | None, browser: str, advanced_tools: bool) -> int:
+@click.option("--transport", type=click.Choice(["stdio", "http", "both"]), default="stdio", show_default=True,
+              help="MCP transport; both serves stdio and Streamable HTTP in one process.")
+@click.option("--host", default="127.0.0.1", show_default=True, help="HTTP bind address; use your Tailscale IP for private-network access.")
+@click.option("--port", type=click.IntRange(1, 65535), default=8765, show_default=True, help="HTTP listening port.")
+@click.option("--allowed-host", multiple=True, help="Additional HTTP Host header, including port; repeat for DNS aliases or reverse proxies.")
+@click.option("--http-token", envvar="HISTORY_MCP_HTTP_TOKEN", help="Optional HTTP bearer token; prefer the environment variable.")
+def main(path: Path | None, browser: str, advanced_tools: bool, transport: str,
+         host: str, port: int, allowed_host: tuple[str, ...], http_token: str | None) -> int:
     app = Server("chrome-history-mcp", version="0.1.0")
 
     @app.call_tool()
@@ -678,12 +685,25 @@ def main(path: Path | None, browser: str, advanced_tools: bool) -> int:
                 read_stream, write_stream, app.create_initialization_options()
             )
 
+    async def run_transports():
+        if transport == "stdio":
+            await arun()
+            return
+        from .network import serve_http
+        if transport == "http":
+            await serve_http(app, host, port, allowed_host, http_token)
+            return
+        async with anyio.create_task_group() as group:
+            group.start_soon(serve_http, app, host, port, allowed_host, http_token)
+            await arun()
+            group.cancel_scope.cancel()
+
     # Keep simultaneous browser instances from sharing a stale history snapshot.
     global history_file_tmp
     with tempfile.TemporaryDirectory(prefix=f"{browser}-history-") as snapshot_dir:
         history_file_tmp = str(Path(snapshot_dir) / "History")
         try:
-            anyio.run(arun)
+            anyio.run(run_transports)
         finally:
             global background_indexer
             if background_indexer is not None:

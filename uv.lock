@@ -50,6 +50,8 @@ dependencies = [
     { name = "mcp" },
     { name = "pandas" },
     { name = "ruff" },
+    { name = "starlette" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
@@ -57,6 +59,8 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.12.1,<2" },
     { name = "pandas", specifier = ">=2.3.1" },
     { name = "ruff", specifier = ">=0.12.4" },
+    { name = "starlette", specifier = ">=0.27" },
+    { name = "uvicorn", specifier = ">=0.31.1" },
 ]
 
 [[package]]
